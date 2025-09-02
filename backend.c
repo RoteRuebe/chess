@@ -1,7 +1,7 @@
 /**
  * @file backend.c
  * @brief the meat and potatoes
- * @version 1.1
+ * @version 1.2
  * @date 1.9.2025
  *
  * TODO: checks, checkmate, sys-arguments(?), import FEN, export PGN;
@@ -119,9 +119,6 @@ void update_state(struct Position* pos) {
     uint8_t from[128];
     uint8_t to[128];
     int num_legal_moves = gen_legal_moves(pos, 0, from, to);
-
-    char msg[32];
-    log_msg(msg, 2);
 
     if(num_legal_moves > 0)
         return;
@@ -254,12 +251,48 @@ void _gen_legal_moves_pawn(struct Position* pos, int square, int allow_checks, i
 }
 
 void _gen_legal_moves_castling(struct Position* pos, int square, int allow_checks, int* index_move, uint8_t* from, uint8_t* to) {
+    uint8_t legal_from[128];
+    uint8_t legal_to[128];
+
+    int kingside_controlled_by_enemy = 0;
+    int queenside_controlled_by_enemy = 0;
+
+    // Safeguard; else endless recursion
+    // TODO: its now unsafe to call gen_legal_moves with allow_checks off for chess engine
+    //      for efficency, because it could try to castle through check. Make seperate
+    //      castling_through_check flag?
+    if(!allow_checks) {
+        // To check if squares are controlled by enemy
+        pos->state = !pos->state;
+        int num_legal_moves = gen_legal_moves(pos, 1, legal_from, legal_to);
+        pos->state = !pos->state;
+
+        for(int i = 0; i < num_legal_moves; i++) {
+            int x = legal_to[i];
+            if (pos->board[square] == K) {
+                if (x == 5 || x == 6) {
+                    kingside_controlled_by_enemy = 1;
+                }
+                else if (x == 3 || x == 2 || x == 1)
+                    queenside_controlled_by_enemy = 1;
+            }
+
+            else if (pos->board[square] == k) {
+                if (x == 61 || x == 62)
+                    kingside_controlled_by_enemy = 1;
+                else if (x == 59 || x == 58 || x == 57)
+                    queenside_controlled_by_enemy = 1;
+            }
+        }
+    }
+
     // White
     if( pos->board[square] == K ) {
         // Kingside
         if (
             ( pos->white_can_castle_king ) &&
-            ( pos->board[5] == o && pos->board[6] == o )
+            ( pos->board[5] == o && pos->board[6] == o ) &&
+            !kingside_controlled_by_enemy
         ) {
             _check_for_check(pos, square, 6, allow_checks, index_move, from, to);
         }
@@ -267,7 +300,8 @@ void _gen_legal_moves_castling(struct Position* pos, int square, int allow_check
         // Queenside
         if (
             ( pos->white_can_castle_queen ) &&
-            ( pos->board[3] == o && pos->board[2] == o && pos->board[1] == o )
+            ( pos->board[3] == o && pos->board[2] == o && pos->board[1] == o ) &&
+            !queenside_controlled_by_enemy
         ) {
             _check_for_check(pos, square, 2, allow_checks, index_move, from, to);
         }
@@ -277,14 +311,16 @@ void _gen_legal_moves_castling(struct Position* pos, int square, int allow_check
     else if( pos->board[square] == k ) {
         if (
             ( pos->black_can_castle_king ) &&
-            ( pos->board[61] == o && pos->board[62] == o )
+            ( pos->board[61] == o && pos->board[62] == o ) &&
+            !kingside_controlled_by_enemy
         ) {
             _check_for_check(pos, square, 62, allow_checks, index_move, from, to);
         }
 
         if (
             ( pos->black_can_castle_queen ) &&
-            ( pos->board[59] == o && pos->board[58] == o && pos->board[57] == o )
+            ( pos->board[59] == o && pos->board[58] == o && pos->board[57] == o ) &&
+            !queenside_controlled_by_enemy
         ) {
             _check_for_check(pos, square, 58, allow_checks, index_move, from, to);
         }
@@ -440,8 +476,7 @@ void init_game(struct Game* game, struct Position* pos, int max_moves) {
     game->halfmove = 0;
     game->max_moves = max_moves;
 
-    game->positions = \
-        (struct Position*) malloc(sizeof(struct Position) * max_moves);
+    game->positions = malloc( sizeof(struct Position) * max_moves );
 
     memcpy(&(game->positions[0].board), pos, sizeof(struct Position));
 }
@@ -469,6 +504,20 @@ void unsafe_play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece pr
     struct Position *new_position = &( game->positions[game->halfmove] );
     enum Piece piece = new_position->board[to];
     enum Game_state color = new_position->state;
+
+    // if enemy has eaten a rook, you cannot castle that way
+    if (color == white) {
+        if (to == 0)
+            new_position->white_can_castle_queen = 0;
+        else if (to == 7)
+            new_position->white_can_castle_king = 0;
+    }
+    else if (color == black) {
+        if (to == 56)
+            new_position->black_can_castle_queen = 0;
+        else if (to == 63)
+            new_position->black_can_castle_king = 0;
+    }
 
     switch (piece) {
         case P:
@@ -543,9 +592,9 @@ void unsafe_play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece pr
 
         case r:
             if (from == 56)
-                new_position->white_can_castle_queen = 0;
+                new_position->black_can_castle_queen = 0;
             else if (from == 63)
-                new_position->white_can_castle_king = 0;
+                new_position->black_can_castle_king = 0;
         break;
     }
 
@@ -694,56 +743,123 @@ int eval_algebraic(struct Game* game, char s[8]) {
     return 0;
 }
 
-/*
 void load_pgn(struct Game* game, FILE* file) {
-    char content[1024];
-    char move[8];
-    fgets(content, 1024, file);
+    log_msg("Loading pgn file", 1);
 
+    char content[MAX_PGN_CONTENT_SIZE];
+    char move[8] = {0};
+    fgets(content, MAX_PGN_CONTENT_SIZE, file);
+    
     int cursor_file = 0;
     int cursor_move = 0;
-    enum Game_state whose_move = neither;
-    int started = 0;
 
-    while(content[cursor_file] != '*') {
+    enum {
+        start,
+        information,
+        comment,
+        before_white,
+        whites_move,
+        before_black, 
+        blacks_move,
+        submit_black,
+        new_line,
+        result,
+        abort
+    } state = start;
+
+    for(; cursor_file < MAX_PGN_CONTENT_SIZE; cursor_file++) {
+        
         char x = content[cursor_file];
 
-        if (x == '.')
-            whose_move = white;
+        switch (state) {
+            case start:
+                if (x == '[')       state = information;
+                else if (x == '{')  state = comment;
+                else if (x == '.')  state = before_white;
+                else if (x == '\n') state = new_line;                    
+                else if (x == '-')  state = result;
+                else if (x == '\0') state = abort;
+                else if (x == '*')  state = abort;
+                break;
 
-        else if (x == ' ' && whose_move == white && started == 0)
-            started = 1;
+            case information:
+                if (x == ']')
+                    state = start;
+                break;
 
-        else if (x == ' ' && whose_move == white && started == 1) {
-            eval_algebraic(game, move);
-            for(int i = 0; i < 8; i++)
-                move[i] = '\0';
-            cursor_move = 0;
+            case comment:
+                if (x == '}')
+                    state = start;
+                break;
 
-            whose_move = black;
+            case before_white:
+                if (x == ' ')
+                    state = whites_move;
+
+                break;
+                    
+            case whites_move:
+                if (x != ' ') {
+                    move[cursor_move] = content[cursor_file];
+                    cursor_move ++;
+                }
+
+                else {
+                    state = before_black;
+                }
+                break;
+
+            // Submit whites move
+            case before_black:
+                if ( !eval_algebraic(game, move) ) {
+                    log_msg("Error in load_pgn(): Illegal move", 0);
+                    exit(0);
+                }
+                for (int i = 0; i < 8; i++) {
+                    move[i] = '\0';
+                }
+                move[0] = x;
+                state = blacks_move;
+                cursor_move = 1;
+                break;
+
+            case blacks_move:
+                if (x != ' ') {
+                    move[cursor_move] = content[cursor_file];
+                    cursor_move ++;
+                }
+
+                else {
+                    state = submit_black;
+                }
+                break;
+
+            case submit_black:
+                if ( !eval_algebraic(game, move) ) {
+                    log_msg("Error in load_pgn(): Illegal move", 0);
+                    exit(0);
+                }
+                for (int i = 0; i < 8; i++) {
+                    move[i] = '\0';
+                }
+                cursor_move = 0;
+
+                state = start;
+                cursor_file --; // enough time to read, for comment -> ugly asf
+                break;
+
+            case new_line:
+                fgets(content, MAX_PGN_CONTENT_SIZE, file);
+                cursor_file = -1; // incremented at start of loop
+                state = start;
+                break;
+
+            case result:
+            case abort:
+                fclose(file);
+                return;
         }
-
-        else if (x == ' ' && whose_move == black) {
-            eval_algebraic(game, move);
-            for(int i = 0; i < 8; i++)
-                move[i] = '\0';
-            cursor_move = 0;
-
-            whose_move = neither;
-            started = 0;
-        }
-
-        if (started) {
-            if (x != ' ') {
-                move[cursor_move] = content[cursor_file];
-                cursor_move++;
-            }
-        }
-
-        cursor_file++;
     }
 
-    fclose(file);
     return;
 }
-*/

@@ -178,9 +178,9 @@ void victory_win(struct Window* state, enum Game_state game_state) {
         break;
     }
 
-    wattron(state->win, A_DIM);
+    wattron(state->win, A_DIM | A_ITALIC);
     mvwprintw(state->win, 3, 2, "Press any key to continue");
-    wattroff(state->win, A_DIM);
+    wattroff(state->win, A_DIM | A_ITALIC);
 
     wrefresh(state->win);
 }
@@ -269,8 +269,8 @@ void setup_wins() {
     {
         int height = 5;
         int width = 30;
-        int y = 2;
-        int x = 59;
+        int y = 30;
+        int x = 5;
 
         victory_win_state = (struct Window) {
             newwin(height, width, y, x)

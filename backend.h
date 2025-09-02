@@ -1,6 +1,8 @@
 #ifndef BACKEND_H
 #define BACKEND_H
 
+#define MAX_PGN_CONTENT_SIZE 2048
+
 // o for empty square, capital letters = white pieces, p/P_passant for pawns that can be taken en passant
 enum Piece {
     o,
@@ -77,7 +79,9 @@ enum Piece get_piece_at(struct Position* pos, uint8_t square);
 * Generate all legal moves. They are stored pairwise in "from" and "to" arrays
 * flag allow_checks:
 *   0: also look, if player is in check
-*   1: ignore if player is in check. Used to avoid infinite loop with in_check() 
+*   1: ignore if player is in check. Used to avoid infinite loop with in_check()  
+*   should always be 0, if calling from outside! 
+*
 * returns: number of legal moves
 */
 int gen_legal_moves(struct Position* pos, int allow_checks, uint8_t* from, uint8_t* to);
@@ -104,6 +108,8 @@ void unsafe_play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece pr
 * returns: success of operation
 */
 int eval_algebraic(struct Game* game, char s[8]);
+
+void load_pgn(struct Game* game, FILE* file);
 
 static struct Position starting_position = {
     {

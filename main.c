@@ -31,6 +31,9 @@ enum {
     in_victory_screen
 } state = in_main_menu;
 
+void init_log() {
+    remove("log.txt");
+}
 
 void log_msg(char *msg, int type) {
     if (type > verbosity)
@@ -43,24 +46,21 @@ void log_msg(char *msg, int type) {
 
     switch(type) {
         case 2: strcpy(prefix, "verbose"); break;
-        case 1: strcpy(prefix, "log    "); break;
-        case 0: strcpy(prefix, "error  "); break;
+        case 1: strcpy(prefix, "  log  "); break;
+        case 0: strcpy(prefix, " error "); break;
     }
 
-    FILE *fptr;
-
-    fptr = fopen("log.txt", "a");
+    FILE *f = fopen("log.txt", "a");
 
     // Append some text to the file
-    fprintf(fptr,
+    fprintf(f,
         "[%s] [%02d.%02d.%d %02d:%02d:%02d]: %s\n", 
         prefix,
         tm.tm_mday, tm.tm_mon + 1, tm.tm_year + 1900, tm.tm_hour, tm.tm_min, tm.tm_sec,
         msg
     );
 
-    // Close the file
-    fclose(fptr); 
+    fclose(f); 
 }
 
 
@@ -74,7 +74,13 @@ void main_menu_func() {
     switch (ret) {
         case new_game:
             log_msg("Starting new game", 1);
-            init_game(&game, &starting_position, 128);
+            init_game(&game, &starting_position, 512);
+
+            // TODO: delete
+            FILE *f = fopen("./example_game.pgn", "r");
+
+            load_pgn(&game, f);
+
             main_menu_state.continue_enabled = 1;
             // fall through
         case cont:
@@ -120,8 +126,10 @@ int game_func() {
         struct Position *last_pos = &game.positions[game.halfmove];
         update_state(last_pos);
 
-        if (last_pos->state != white && last_pos->state != black)
+        if (last_pos->state != white && last_pos->state != black) {
             state = in_victory_screen;
+            main_menu_state.continue_enabled = 0;
+        }
     }
 
     // Clear input buffer
@@ -177,6 +185,7 @@ void loop() {
 }
 
 int main() {
+    init_log();
     log_msg("Starting session", 1);
 
     init_curses();

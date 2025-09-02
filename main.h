@@ -1,6 +1,9 @@
 #ifndef MAIN_H
 #define MAIN_H
 
+#define VERSION_MAJ 1
+#define VERSION_MIN 1
+
 static int verbosity = 1;
 
 /* Which things to log

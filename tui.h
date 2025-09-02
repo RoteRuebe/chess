@@ -1,9 +1,6 @@
 #ifndef TUI_H
 #define TUI_H
 
-#define VERSION_MAJ 1
-#define VERSION_MIN 0
-
 #include "backend.h"
 
 /* 
