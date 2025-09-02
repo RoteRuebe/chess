@@ -12,7 +12,6 @@ enum Piece {
 // Missuse since used for so many different things?
 enum Game_state {
     white, black,
-    both, neither,
     white_win, black_win, draw
 };
 
@@ -44,15 +43,27 @@ struct Position {
 
 /*
 * A game of chess consisting of a series of positions.
+* max_moves denotes the length of the positions array
 */
 struct Game {
-    struct Position position[256];
+    struct Position *positions;
+    int max_moves;
 
     uint8_t halfmove;
 };
 
 int is_white(enum Piece piece);
 int is_black(enum Piece piece);
+
+/*
+* returns: if current player is in check
+*/
+int in_check(struct Position* pos);
+
+/*
+* Figures out if position is a checkmate or a draw and updates state accordingly
+*/
+void update_state(struct Position* pos);
 
 /*
 * Check if move is legal against (already generated) arrays of all legal moves
@@ -64,14 +75,18 @@ enum Piece get_piece_at(struct Position* pos, uint8_t square);
 
 /*
 * Generate all legal moves. They are stored pairwise in "from" and "to" arrays
+* flag allow_checks:
+*   0: also look, if player is in check
+*   1: ignore if player is in check. Used to avoid infinite loop with in_check() 
 * returns: number of legal moves
 */
-int gen_legal_moves(struct Position* pos, uint8_t* from, uint8_t* to);
+int gen_legal_moves(struct Position* pos, int allow_checks, uint8_t* from, uint8_t* to);
 
 /*
-* Initialize game to starting position
+* Initialize game to any starting position, with length max_moves
 */
-void init_game(struct Game* game);
+void init_game(struct Game* game, struct Position* pos, int max_moves);
+void delete_game(struct Game* game);
 
 /*
 * Play move, checking for legality
@@ -89,5 +104,18 @@ void unsafe_play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece pr
 * returns: success of operation
 */
 int eval_algebraic(struct Game* game, char s[8]);
+
+static struct Position starting_position = {
+    {
+        R,N,B,Q,K,B,N,R,
+        P,P,P,P,P,P,P,P,
+        o,o,o,o,o,o,o,o,
+        o,o,o,o,o,o,o,o,
+        o,o,o,o,o,o,o,o,
+        o,o,o,o,o,o,o,o,
+        p,p,p,p,p,p,p,p,
+        r,n,b,q,k,b,n,r
+    }, white, 1, 1, 1, 1
+};
 
 #endif

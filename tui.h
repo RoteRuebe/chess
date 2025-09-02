@@ -53,10 +53,12 @@ void about(struct Window* state);
 
 void error_win(struct Window* state);
 
+void victory_win(struct Window* state, enum Game_state game_state);
+
 void init_curses();
 void setup_wins();
 
 extern struct Menu main_menu_state;
-extern struct Window header_state, boardscr_state, input_state, about_state, error_win_state;
-
+extern struct Window header_state, boardscr_state, \
+    input_state, about_state, error_win_state, victory_win_state;
 #endif

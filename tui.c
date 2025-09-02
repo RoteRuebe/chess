@@ -13,15 +13,17 @@
 #include <locale.h>
 
 #include "tui.h"
+#include "main.h"
 #include "backend.h"
 
 void quit() {
+    log_msg("Exiting", 1);
     endwin();
 }
 
 struct Window {
     WINDOW *win;
-} header_state, boardscr_state, input_state, about_state, error_win_state;
+} header_state, boardscr_state, input_state, about_state, error_win_state, victory_win_state;
 
 void header(struct Window* state) {
     // Escaped backslashes make it look unaligned - its not
@@ -45,6 +47,8 @@ struct Menu {
 } main_menu_state;
 
 int menu(struct Menu* state) {
+    log_msg("Going into main menu", 2);
+
     while (1) {
         for (int i = 0; i < state->num_options; i++) {
             if (i == state->selected)
@@ -137,6 +141,7 @@ void input(struct Window* state, char* input) {
 }
 
 void about(struct Window* state) {
+    log_msg("Opening about page", 2);
     mvwprintw(state->win, 0, 0, "Yet another implementation of the game of chess");
     mvwprintw(state->win, 2, 0, "Written by: Yannick Zickler");
     mvwprintw(state->win, 3, 0, "Version: %d.%d", VERSION_MAJ, VERSION_MIN);
@@ -154,6 +159,28 @@ void error_win(struct Window* state) {
     wattron(state->win, COLOR_PAIR(1));
     mvwprintw(state->win, 0, 0, "Invalid Input!");
     wattroff(state->win, COLOR_PAIR(1) || A_REVERSE);
+
+    wrefresh(state->win);
+}
+
+void victory_win(struct Window* state, enum Game_state game_state) {
+    box(state->win, 0, 0);
+
+    switch (game_state) {
+        case white_win:
+            mvwprintw(state->win, 1, 2, "White has won the game!");
+        break;
+        case black_win:
+            mvwprintw(state->win, 1, 2, "Black has won the game!");
+        break;
+        case draw:
+            mvwprintw(state->win, 1, 2, "It's a draw!");
+        break;
+    }
+
+    wattron(state->win, A_DIM);
+    mvwprintw(state->win, 3, 2, "Press any key to continue");
+    wattroff(state->win, A_DIM);
 
     wrefresh(state->win);
 }
@@ -237,9 +264,21 @@ void setup_wins() {
             newwin(height, width, y, x)
         };
     }
+    
+    // VICTORY WIN
+    {
+        int height = 5;
+        int width = 30;
+        int y = 2;
+        int x = 59;
 
+        victory_win_state = (struct Window) {
+            newwin(height, width, y, x)
+        };
+    }
+ 
     // ABOUT PAGE
-        {
+    {
         int height = 20;
         int width = COLS-10;
         int y = 2;

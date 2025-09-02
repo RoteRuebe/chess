@@ -1,7 +1,7 @@
 /**
  * @file backend.c
  * @brief the meat and potatoes
- * @version 1.0
+ * @version 1.1
  * @date 1.9.2025
  *
  * TODO: checks, checkmate, sys-arguments(?), import FEN, export PGN;
@@ -39,27 +39,15 @@
 #include <ctype.h>
 
 #include "backend.h"
+#include "main.h"
 
 #define X 0
 #define Y 1
 
-static struct Position starting_position = {
-    {
-        R,N,B,Q,K,B,N,R,
-        P,P,P,P,P,P,P,P,
-        o,o,o,o,o,o,o,o,
-        o,o,o,o,o,o,o,o,
-        o,o,o,o,o,o,o,o,
-        o,o,o,o,o,o,o,o,
-        p,p,p,p,p,p,p,p,
-        r,n,b,q,k,b,n,r
-    }, white, 1, 1, 1, 1
-};
-
 // differences of squares a knights jump away
 static int8_t knights_jump[8][2] = {
     {1, 2}, {-1, 2}, {-1, -2}, {1, -2},
-    {2, 1}, {-2, 1}, {-2, -1}, {-2, 1}
+    {2, 1}, {-2, 1}, {-2, -1}, {2, -1}
 };
 
 static int8_t kings_move[8][2] = {
@@ -125,76 +113,147 @@ enum Piece get_piece_at(struct Position* pos, uint8_t square) {
     return pos->board[square];
 }
 
-void _gen_legal_moves_Pawn(struct Position* pos, int square, int* index_move, uint8_t* from, uint8_t* to) {
+void update_state(struct Position* pos) {
+    int was_in_check = in_check(pos);
+
+    uint8_t from[128];
+    uint8_t to[128];
+    int num_legal_moves = gen_legal_moves(pos, 0, from, to);
+
+    char msg[32];
+    log_msg(msg, 2);
+
+    if(num_legal_moves > 0)
+        return;
+
+    log_msg("Game has concluded", 1);
+
+    if (was_in_check) {
+        if (pos->state == black)
+            pos->state = white_win;
+        else if (pos->state == white)
+            pos->state = black_win;
+    }
+    else
+        pos->state = draw;
+}
+
+int in_check(struct Position* pos) {
+    int ret = 0;
+    int king_square;
+
+    enum Game_state color = pos->state;
+
+    for (int square = 0; square < 64; square++) {
+        if(
+            (color == white && pos->board[square] == K) ||
+            (color == black && pos->board[square] == k)
+        ) {
+            king_square = square;
+        }
+    }
+
+    // Check if opposite color could take king
+    pos->state = !pos->state;
+    uint8_t from[128];
+    uint8_t to[128];
+    int num_legal_moves = gen_legal_moves(pos, 1, from, to);
+
+    for (int i = 0; i < num_legal_moves; i++) {
+        if (to[i] == king_square) {
+            ret = 1;
+        }
+    }
+
+    pos->state = !pos->state;
+
+    return ret;
+}
+
+void _check_for_check(struct Position* pos, uint8_t new_from, uint8_t new_to, int allow_checks, int* index_move, uint8_t* from, uint8_t* to) {
+    // Try and play the move to see, if player still in check
+    if (!allow_checks) { 
+        struct Game try_game;
+        init_game(&try_game, pos, 2);
+
+        unsafe_play_move(&try_game, new_from, new_to, o);
+
+        try_game.positions[1].state = !try_game.positions[1].state;
+        
+        if (in_check( &try_game.positions[1]) )
+            return;
+
+        delete_game(&try_game);
+    }
+
+    from[*index_move] = new_from;
+    to[*index_move] = new_to;
+    *(index_move) = *(index_move) + 1;
+}
+
+void _gen_legal_moves_Pawn(struct Position* pos, int square, int allow_checks, int* index_move, uint8_t* from, uint8_t* to) {
+    int y = square / 8;
+    int x = square % 8;
+
     // One square
     if (pos->board[square+8] == o) {
-        from[*index_move] = square;
-        to[*index_move] = square + 8;
-        *(index_move) = *(index_move) + 1;
+        _check_for_check(pos, square, square+8, allow_checks, index_move, from, to);
 
         // Two squares
-        if (
-            (8 <= square && square < 16) &&
-            (pos->board[square+16] == o)
-        ) {
-            from[*index_move] = square;
-            to[*index_move] = square + 16;
-            *(index_move) = *(index_move) + 1;
+        if ( y == 1 && pos->board[square+16] == o ) {
+            _check_for_check(pos, square, square+16, allow_checks, index_move, from, to);
         }
     }
     // Diagonal or en-passant
-    if (
-        is_black(pos->board[square+7]) ||
-        pos->board[square-1] == p_passant
-    ) {
-        from[*index_move] = square;
-        to[*index_move] = square + 7;
-        *(index_move) = *(index_move) + 1;
-    }
-    if (
-        is_black(pos->board[square+9]) ||
-        pos->board[square+1] == p_passant
-    ) {
-        from[*index_move] = square;
-        to[*index_move] = square+9;
-        *(index_move) = *(index_move) + 1;
-    }
-}
-
-void _gen_legal_moves_pawn(struct Position* pos, int square, int* index_move, uint8_t* from, uint8_t* to) {
-    if (pos->board[square-8] == o) {
-        from[*index_move] = square;
-        to[*index_move] = square - 8;
-        *(index_move) = *(index_move) + 1;
-
-        if (
-            (48 <= square && square < 55) &&
-            (pos->board[square-16] == o)
+    if ( x != 0 ) {
+        if(
+            is_black(pos->board[square+7]) ||
+            pos->board[square-1] == p_passant
         ) {
-            from[*index_move] = square;
-            to[*index_move] = square - 16;
-            *(index_move) = *(index_move) + 1;
+            _check_for_check(pos, square, square+7, allow_checks, index_move, from, to);
         }
     }
-    if (
-        is_white(pos->board[square-7])||
-        pos->board[square+1] == P_passant
-    ) {
-        from[*index_move] = square;
-        to[*index_move] = square - 7;
-        *(index_move) = *(index_move) + 1;
-    }
-    if (
-        is_white(pos->board[square-9]) ||
-        pos->board[square-1] == P_passant
-    ) {
-        from[*index_move] = square;
-        to[*index_move] = square - 9;
-        *(index_move) = *(index_move) + 1;
+
+    if ( x != 7 ) {
+        if (
+            is_black(pos->board[square+9]) ||
+            pos->board[square+1] == p_passant
+        ) {
+            _check_for_check(pos, square, square+9, allow_checks, index_move, from, to);
+        }
     }
 }
 
-void _gen_legal_moves_castling(struct Position* pos, int square, int* index_move, uint8_t* from, uint8_t* to) {
+void _gen_legal_moves_pawn(struct Position* pos, int square, int allow_checks, int* index_move, uint8_t* from, uint8_t* to) {
+    int y = square / 8;
+    int x = square % 8;
+
+    if (pos->board[square-8] == o) {
+        _check_for_check(pos, square, square-8, allow_checks, index_move, from, to);
+        if ( y == 6 && pos->board[square-16] == o) {
+            _check_for_check(pos, square, square-16, allow_checks, index_move, from, to);
+        }
+    }
+    if ( x != 7 ) {
+        if (
+            is_white(pos->board[square-7])||
+            pos->board[square+1] == P_passant
+        ) {
+            _check_for_check(pos, square, square-7, allow_checks, index_move, from, to);
+        }
+    }
+    
+    if ( x != 0 ) {
+        if (
+            is_white(pos->board[square-9]) ||
+            pos->board[square-1] == P_passant
+        ) {
+            _check_for_check(pos, square, square-9, allow_checks, index_move, from, to);
+        }
+    }
+}
+
+void _gen_legal_moves_castling(struct Position* pos, int square, int allow_checks, int* index_move, uint8_t* from, uint8_t* to) {
     // White
     if( pos->board[square] == K ) {
         // Kingside
@@ -202,9 +261,7 @@ void _gen_legal_moves_castling(struct Position* pos, int square, int* index_move
             ( pos->white_can_castle_king ) &&
             ( pos->board[5] == o && pos->board[6] == o )
         ) {
-            from[*index_move] = square;
-            to[*index_move] = 6;
-            *(index_move) = *(index_move) + 1;
+            _check_for_check(pos, square, 6, allow_checks, index_move, from, to);
         }
 
         // Queenside
@@ -212,9 +269,7 @@ void _gen_legal_moves_castling(struct Position* pos, int square, int* index_move
             ( pos->white_can_castle_queen ) &&
             ( pos->board[3] == o && pos->board[2] == o && pos->board[1] == o )
         ) {
-            from[*index_move] = square;
-            to[*index_move] = 2;
-            *(index_move) = *(index_move) + 1;
+            _check_for_check(pos, square, 2, allow_checks, index_move, from, to);
         }
     }
 
@@ -224,23 +279,19 @@ void _gen_legal_moves_castling(struct Position* pos, int square, int* index_move
             ( pos->black_can_castle_king ) &&
             ( pos->board[61] == o && pos->board[62] == o )
         ) {
-            from[*index_move] = square;
-            to[*index_move] = 62;
-            *(index_move) = *(index_move) + 1;
+            _check_for_check(pos, square, 62, allow_checks, index_move, from, to);
         }
 
         if (
             ( pos->black_can_castle_queen ) &&
             ( pos->board[59] == o && pos->board[58] == o && pos->board[57] == o )
         ) {
-            from[*index_move] = square;
-            to[*index_move] = 58;
-            *(index_move) = *(index_move) + 1;
+            _check_for_check(pos, square, 58, allow_checks, index_move, from, to);
         }
     }
 }
 
-void _gen_legal_moves_knight_king(struct Position* pos, int square, int* index_move, uint8_t* from, uint8_t* to) {
+void _gen_legal_moves_knight_king(struct Position* pos, int square, int allow_checks,  int* index_move, uint8_t* from, uint8_t* to) {
     int x = square % 8;
     int y = square / 8;
 
@@ -274,14 +325,12 @@ void _gen_legal_moves_knight_king(struct Position* pos, int square, int* index_m
         }
 
         else {
-            from[*index_move] = square;
-            to[*index_move] = new_square;
-            *(index_move) = *(index_move) + 1;
+            _check_for_check(pos, square, new_square, allow_checks, index_move, from, to);
         }
     }
 }
 
-void _gen_legal_moves_other(struct Position* pos, int square, int* index_move, uint8_t* from, uint8_t* to) {
+void _gen_legal_moves_other(struct Position* pos, int square, int allow_checks, int* index_move, uint8_t* from, uint8_t* to) {
     int x = square % 8;
     int y = square / 8;
 
@@ -325,9 +374,7 @@ void _gen_legal_moves_other(struct Position* pos, int square, int* index_move, u
 
             // Empty
             else if (pos->board[new_square] == o) {
-                from[*index_move] = square;
-                to[*index_move] = new_square;
-                *(index_move) = *(index_move) + 1;
+                _check_for_check(pos, square, new_square, allow_checks, index_move, from, to);
             }
 
             // Opposite color
@@ -335,20 +382,21 @@ void _gen_legal_moves_other(struct Position* pos, int square, int* index_move, u
                 ( is_white(piece) && is_black(pos->board[new_square]) ) ||
                 ( is_black(piece) && is_white(pos->board[new_square]) )
             ) {
-                from[*index_move] = square;
-                to[*index_move] = new_square;
-                *(index_move) = *(index_move) + 1;
+                _check_for_check(pos, square, new_square, allow_checks, index_move, from, to);
                 break;
             }
         }
     }
 }
 
-int gen_legal_moves(struct Position* pos, uint8_t* from, uint8_t* to) {
+int gen_legal_moves(struct Position* pos, int allow_checks, uint8_t* from, uint8_t* to) {
+    if (!allow_checks)
+        log_msg("Generating legal moves...", 2);
+
     enum Game_state color = pos->state;
 
     if ( !(color == white || color == black) ) {
-        printf("Error in gen_legal_moves(): Generated moves on finished game\n");
+        log_msg("Error in gen_legal_moves(): Generated moves on finished game", 0);
         exit(1);
     }
 
@@ -363,23 +411,23 @@ int gen_legal_moves(struct Position* pos, uint8_t* from, uint8_t* to) {
 
         switch (piece) {
             case P: case P_passant:
-                _gen_legal_moves_Pawn(pos, square, &index_move, from, to);
+                _gen_legal_moves_Pawn(pos, square, allow_checks, &index_move, from, to);
 
                 break;
 
             case p: case p_passant:
-                _gen_legal_moves_pawn(pos, square, &index_move, from, to);
+                _gen_legal_moves_pawn(pos, square, allow_checks, &index_move, from, to);
                 break;
 
             case K: case k:
-                _gen_legal_moves_castling(pos, square, &index_move, from, to);
+                _gen_legal_moves_castling(pos, square, allow_checks, &index_move, from, to);
                 // fall-through
             case N: case n:
-                _gen_legal_moves_knight_king(pos, square, &index_move, from, to);
+                _gen_legal_moves_knight_king(pos, square, allow_checks, &index_move, from, to);
             break;
 
             case B: case R: case Q: case b: case r: case q:
-                _gen_legal_moves_other(pos, square, &index_move, from, to);
+                _gen_legal_moves_other(pos, square, allow_checks, &index_move, from, to);
         }
     }
     return index_move;
@@ -388,15 +436,23 @@ int gen_legal_moves(struct Position* pos, uint8_t* from, uint8_t* to) {
 
 /*** Methods of struct Game ***/
 
-void init_game(struct Game* game) {
+void init_game(struct Game* game, struct Position* pos, int max_moves) {
     game->halfmove = 0;
+    game->max_moves = max_moves;
 
-    memcpy(&(game->position[0].board), &starting_position, sizeof(struct Position));
+    game->positions = \
+        (struct Position*) malloc(sizeof(struct Position) * max_moves);
+
+    memcpy(&(game->positions[0].board), pos, sizeof(struct Position));
+}
+
+void delete_game(struct Game* game) {
+    free(game->positions);
 }
 
 void _force_move(struct Game* game, uint8_t from, uint8_t to) {
-    struct Position *crnt_pos = &(game->position[game->halfmove]);
-    struct Position *next_pos = &(game->position[game->halfmove + 1]);
+    struct Position *crnt_pos = &(game->positions[game->halfmove]);
+    struct Position *next_pos = &(game->positions[game->halfmove + 1]);
 
     memcpy(next_pos, crnt_pos, sizeof(struct Position));
     next_pos->state = !crnt_pos->state;
@@ -410,7 +466,7 @@ void _force_move(struct Game* game, uint8_t from, uint8_t to) {
 void unsafe_play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece promote) {
     _force_move(game, from, to);
 
-    struct Position *new_position = &( game->position[game->halfmove] );
+    struct Position *new_position = &( game->positions[game->halfmove] );
     enum Piece piece = new_position->board[to];
     enum Game_state color = new_position->state;
 
@@ -503,10 +559,14 @@ void unsafe_play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece pr
 }
 
 int play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece promote) {
+    char msg[64];
+    snprintf(msg, 64, "Playing move %d to %d", from, to);
+    log_msg(msg, 2);
+
     uint8_t legal_from[128];
     uint8_t legal_to[128];
 
-    int num_legal_moves = gen_legal_moves( &(game->position[game->halfmove]), legal_from, legal_to);
+    int num_legal_moves = gen_legal_moves( &(game->positions[game->halfmove]), 0, legal_from, legal_to);
 
     if( is_legal(legal_from, legal_to, num_legal_moves, from, to) ) {
         unsafe_play_move(game, from, to, promote);
@@ -516,14 +576,20 @@ int play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece promote) {
         return 0;
 }
 
+// TODO: when two moves are possible but which one to do is not further specified, this
+// function will simply use the first possible it can find
 int eval_algebraic(struct Game* game, char s[8]) {
-    struct Position *crnt_pos = &(game->position[game->halfmove]);
+    char msg[64];
+    snprintf(msg, 64, "Interpreting move \'%s\'", s);
+    log_msg(msg, 2);
+
+    struct Position *crnt_pos = &(game->positions[game->halfmove]);
     enum Game_state color = crnt_pos->state;
 
     uint8_t legal_from[128];
     uint8_t legal_to[128];
 
-    int num_legal_moves = gen_legal_moves( crnt_pos, legal_from, legal_to );
+    int num_legal_moves = gen_legal_moves( crnt_pos, 0, legal_from, legal_to );
 
     // quick and dirty
     if( !strcmp(s, "O-O") || !strcmp(s, "0-0")) {
@@ -601,6 +667,10 @@ int eval_algebraic(struct Game* game, char s[8]) {
 
     // If legal moves > 1, check specifiers
     if (num_moves == 1) {
+        char msg[64];
+        snprintf(msg, 64, "Found suitor %d to %d", legal_moves[0], end);
+        log_msg(msg, 2);
+
         unsafe_play_move(game, legal_moves[0], end, promote_to);
         return 1;
     }
@@ -612,6 +682,9 @@ int eval_algebraic(struct Game* game, char s[8]) {
 
             if ( file != -1 && legal_moves[move] / 8 != file )
                 continue;
+
+            snprintf(msg, 64, "Found suitor %d to %d", legal_moves[move], end);
+            log_msg(msg, 2);
 
             unsafe_play_move(game, legal_moves[move], end, promote_to);
             return 1;
