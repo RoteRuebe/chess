@@ -1,16 +1,13 @@
-#ifndef MAIN_H
-#define MAIN_H
+#pragma once
 
 #define VERSION_MAJ 1
 #define VERSION_MIN 1
 
-static int verbosity = 1;
+enum Verbosity {
+    verbose,
+    log,
+    error
+};
 
-/* Which things to log
- * 2 -> all
- * 1 -> only log and error
- * 0 -> only error
-*/
-void log_msg(char* msg, int type);
+void log_msg(char* msg, enum Verbosity type);
 
-#endif

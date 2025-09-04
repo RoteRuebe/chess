@@ -1,7 +1,6 @@
-#ifndef BACKEND_H
-#define BACKEND_H
+#pragma once
 
-#define MAX_PGN_CONTENT_SIZE 2048
+#include <stdio.h>
 
 // o for empty square, capital letters = white pieces, p/P_passant for pawns that can be taken en passant
 enum Piece {
@@ -89,7 +88,7 @@ int gen_legal_moves(struct Position* pos, int allow_checks, uint8_t* from, uint8
 /*
 * Initialize game to any starting position, with length max_moves
 */
-void init_game(struct Game* game, struct Position* pos, int max_moves);
+void init_game(struct Game* game, const struct Position* pos, int max_moves);
 void delete_game(struct Game* game);
 
 /*
@@ -111,17 +110,4 @@ int eval_algebraic(struct Game* game, char s[8]);
 
 void load_pgn(struct Game* game, FILE* file);
 
-static struct Position starting_position = {
-    {
-        R,N,B,Q,K,B,N,R,
-        P,P,P,P,P,P,P,P,
-        o,o,o,o,o,o,o,o,
-        o,o,o,o,o,o,o,o,
-        o,o,o,o,o,o,o,o,
-        o,o,o,o,o,o,o,o,
-        p,p,p,p,p,p,p,p,
-        r,n,b,q,k,b,n,r
-    }, white, 1, 1, 1, 1
-};
-
-#endif
+extern const struct Position starting_position;
