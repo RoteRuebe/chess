@@ -1,3 +1,5 @@
 #pragma once
 
-void tui_main();
+void tui_loop();
+
+void init_tui();

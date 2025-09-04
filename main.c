@@ -20,6 +20,7 @@
 #include "main.h"
 #include "tui.h"
 #include "backend.h"
+#include "engine.h"
 
 
 const enum Verbosity verbosity = verbose;
@@ -56,11 +57,18 @@ void log_msg(char *msg, enum Verbosity type) {
     fclose(f); 
 }
 
+
 int main() {
     init_log();
-    log_msg("Starting session", 1);
+    log_msg("(main) Starting session", 1);
 
-    tui_main();
+    init_tui();
+    init_engine();
+
+    for(;;) {
+        tui_loop();
+    }
 
     return 0;
 }
+

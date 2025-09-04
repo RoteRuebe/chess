@@ -141,7 +141,7 @@ void update_state(struct Position* pos) {
     if(num_legal_moves > 0)
         return;
 
-    log_msg("Game has concluded", log);
+    log_msg("(backend) Game has concluded", log);
 
     if (was_in_check) {
         if (pos->state == black)
@@ -288,17 +288,17 @@ void _gen_legal_moves_castling(struct Position* pos, int square, int allow_check
         for(int i = 0; i < num_legal_moves; i++) {
             int x = legal_to[i];
             if (pos->board[square] == K) {
-                if (x == 5 || x == 6) {
+                if (x == 4 || x == 5 || x == 6) {
                     kingside_controlled_by_enemy = 1;
                 }
-                else if (x == 3 || x == 2 || x == 1)
+                else if (x == 4 || x == 3 || x == 2 || x == 1)
                     queenside_controlled_by_enemy = 1;
             }
 
             else if (pos->board[square] == k) {
-                if (x == 61 || x == 62)
+                if (x == 60 || x == 61 || x == 62)
                     kingside_controlled_by_enemy = 1;
-                else if (x == 59 || x == 58 || x == 57)
+                else if (x == 60 || x == 59 || x == 58 || x == 57)
                     queenside_controlled_by_enemy = 1;
             }
         }
@@ -444,9 +444,6 @@ void _gen_legal_moves_other(struct Position* pos, int square, int allow_checks, 
 }
 
 int gen_legal_moves(struct Position* pos, int allow_checks, uint8_t* from, uint8_t* to) {
-    if (!allow_checks)
-        log_msg("Generating legal moves...", verbose);
-
     enum Game_state color = pos->state;
 
     if ( !(color == white || color == black) ) {
@@ -503,23 +500,17 @@ void delete_game(struct Game* game) {
     free(game->positions);
 }
 
-void _force_move(struct Game* game, uint8_t from, uint8_t to) {
-    struct Position *crnt_pos = &(game->positions[game->halfmove]);
-    struct Position *next_pos = &(game->positions[game->halfmove + 1]);
+void _force_move(struct Position* crnt_position, struct Position* new_position, uint8_t from, uint8_t to) {
+    memcpy(new_position, crnt_position, sizeof(struct Position));
+    new_position->state = !crnt_position->state;
 
-    memcpy(next_pos, crnt_pos, sizeof(struct Position));
-    next_pos->state = !crnt_pos->state;
-
-    next_pos->board[to] = next_pos->board[from];
-    next_pos->board[from] = 0;
-
-    game->halfmove++;
+    new_position->board[to] = new_position->board[from];
+    new_position->board[from] = 0;
 }
 
-void unsafe_play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece promote) {
-    _force_move(game, from, to);
+void unsafe_play_move_to(struct Position* crnt_position, struct Position* new_position, uint8_t from, uint8_t to, enum Piece promote) {
+    _force_move(crnt_position, new_position, from, to);
 
-    struct Position *new_position = &( game->positions[game->halfmove] );
     enum Piece piece = new_position->board[to];
     enum Game_state color = new_position->state;
 
@@ -627,9 +618,15 @@ void unsafe_play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece pr
     }
 }
 
+void unsafe_play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece promote) {
+    unsafe_play_move_to( &game->positions[game->halfmove], &game->positions[game->halfmove+1], from, to, promote );
+
+    game->halfmove++;
+}
+
 int play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece promote) {
     char msg[64];
-    snprintf(msg, 64, "Playing move %d to %d", from, to);
+    snprintf(msg, 64, "(backend) Playing move %d to %d", from, to);
     log_msg(msg, verbose);
 
     uint8_t legal_from[128];
@@ -649,7 +646,7 @@ int play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece promote) {
 // function will simply use the first possible it can find
 int eval_algebraic(struct Game* game, char s[8]) {
     char msg[64];
-    snprintf(msg, 64, "Interpreting move \'%s\'", s);
+    snprintf(msg, 64, "(backend) Interpreting move \'%s\'", s);
     log_msg(msg, verbose);
 
     struct Position *crnt_pos = &(game->positions[game->halfmove]);
@@ -737,7 +734,7 @@ int eval_algebraic(struct Game* game, char s[8]) {
     // If legal moves > 1, check specifiers
     if (num_moves == 1) {
         char msg[64];
-        snprintf(msg, 64, "Found suitor %d to %d", legal_moves[0], end);
+        snprintf(msg, 64, "(backend) Found suitor %d to %d", legal_moves[0], end);
         log_msg(msg, verbose);
 
         unsafe_play_move(game, legal_moves[0], end, promote_to);
@@ -752,7 +749,7 @@ int eval_algebraic(struct Game* game, char s[8]) {
             if ( file != -1 && legal_moves[move] / 8 != file )
                 continue;
 
-            snprintf(msg, 64, "Found suitor %d to %d", legal_moves[move], end);
+            snprintf(msg, 64, "(backend) Found suitor %d to %d", legal_moves[move], end);
             log_msg(msg, verbose);
 
             unsafe_play_move(game, legal_moves[move], end, promote_to);
@@ -769,7 +766,7 @@ void load_pgn(struct Game* game, FILE* file) {
         exit(1);
     }
     
-    log_msg("Loading pgn file", log);
+    log_msg("(backend) Loading pgn file", log);
 
     char content[max_pgn_content_size];
     char move[8] = {0};

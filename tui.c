@@ -2,7 +2,7 @@
  * @file tui.c
  * @author yannnick
  * @brief Handling the text-based graphical interface
- * @version 1.1
+ * @version 1.2
  * @date 1.9.2025
  */
 
@@ -18,9 +18,22 @@
 #include "main.h"
 #include "backend.h"
 
-/*** Definitions ***/
+#include "engine.h"
 
 struct Game game;
+
+/*** Definitions ***/
+
+enum State {
+    in_main_menu,
+    in_sub_menu,
+    in_game_human,
+    in_game_engine,
+    in_game_human_with_error,
+    in_game_engine_with_error,
+    in_about_page,
+    in_victory_screen
+};
 
 struct Window {
     WINDOW *win;
@@ -32,8 +45,10 @@ struct Menu {
     int num_options;
     int continue_enabled;
 
+    enum State prev_state;
+
     char **options;
-} main_menu_state;    
+} main_menu_state, sub_menu_state;    
 
 char *main_menu_options[] = {
     "Continue",
@@ -45,6 +60,12 @@ char *main_menu_options[] = {
 };
 const int num_main_menu_options = 6;
 
+char *sub_menu_options[] = {
+    "Against Human",
+    "Against Engine"
+};
+const int num_sub_menu_options = 2;
+
 enum Main_menu_return {
     option_continue,
     option_new_game,
@@ -54,10 +75,15 @@ enum Main_menu_return {
     option_quit
 };
 
+enum Sub_menu_return {
+    option_against_human,
+    option_against_engine
+};
+
 /*** Initializing functions ***/
 
 void quit() {
-    log_msg("Exiting", log);
+    log_msg("(tui) Exiting", log);
     endwin();
 }
 
@@ -69,6 +95,7 @@ void init_curses() {
 
     // -1 -> default background color (keeps transperancy)
     init_pair(1, COLOR_RED, -1);
+    init_pair(2, COLOR_WHITE, COLOR_BLACK);
 
     atexit(quit);
     cbreak(); 
@@ -91,16 +118,22 @@ void setup_wins() {
         };
     }
 
-    // MAIN MENU
+    // MENUS
     {
         int height = num_main_menu_options;
-        int width = 10;
+        int width = 15;
         int y = 10;
         int x = (COLS - width)/2;
+        WINDOW *win = newwin(height, width, y, x);
 
         main_menu_state = (struct Menu) {
-            newwin(height, width, y, x),
-            1, num_main_menu_options, 0, main_menu_options
+            win,
+            1, num_main_menu_options, 0, in_game_human, main_menu_options
+        };
+
+        sub_menu_state = (struct Menu) {
+            win,
+            0, num_sub_menu_options, 1, in_game_human, sub_menu_options
         };
     }
     keypad(main_menu_state.win, TRUE);
@@ -180,9 +213,7 @@ void draw_header(struct Window* state) {
     wrefresh(state->win);
 }
 
-enum Main_menu_return draw_menu(struct Menu* state) {
-    log_msg("Opening main menu", verbose);
-
+int draw_menu(struct Menu* state) {
     while (1) {
         for (int i = 0; i < state->num_options; i++) {
             if (i == state->selected)
@@ -199,6 +230,7 @@ enum Main_menu_return draw_menu(struct Menu* state) {
         }
         wrefresh(state->win);
 
+
         int ch;
 
         ch = wgetch(state->win);
@@ -213,7 +245,7 @@ enum Main_menu_return draw_menu(struct Menu* state) {
                     state->selected++;
             break;
             case '\n':
-                return (enum Main_menu_return)state->selected;
+                return state->selected;
         }
 
         if (!state->continue_enabled && state->selected == 0)
@@ -236,8 +268,17 @@ void draw_board(struct Window* state, struct Position* pos) {
 
     for(int y = 0; y < 8; y++) {
         for(int x = 0; x < 8; x++) {
+
+            if ( (x+y) % 2 == 0 ) {
+                wattron(state->win, COLOR_PAIR(2));
+                char string[] = "     ";
+                mvwaddstr(state->win, 20-y*3+2, x*6+1, string);
+                mvwaddstr(state->win, 21-y*3+2, x*6+1, string);
+            }
+
             enum Piece piece = pos->board[x+8*y];
             wchar_t to_print[2] = {L' ', '\0'};
+            
             
             switch (piece) {
                 case p: case p_passant: 
@@ -259,10 +300,13 @@ void draw_board(struct Window* state, struct Position* pos) {
             }
 
             mvwaddwstr(state->win, 21-y*3+2, x*6+3, to_print);
+
+            wattroff(state->win, COLOR_PAIR(2));
         }
     }
 
     wrefresh(state->win);
+
 }
 
 void draw_input(struct Window* state, char* input) {
@@ -275,7 +319,7 @@ void draw_input(struct Window* state, char* input) {
 }
 
 void draw_about(struct Window* state) {
-    log_msg("Opening about page", verbose);
+    log_msg("(tui) Opening about page", verbose);
     mvwprintw(state->win, 0, 0, "Yet another implementation of the game of chess");
     mvwprintw(state->win, 2, 0, "Written by: Yannick Zickler");
     mvwprintw(state->win, 3, 0, "Version: %d.%d", VERSION_MAJ, VERSION_MIN);
@@ -325,36 +369,28 @@ void draw_victory(struct Window* state, enum Game_state game_state) {
 
 /*** Implementing tui logic ***/
 
-enum State {
-    in_main_menu,
-    in_game,
-    in_game_with_error,
-    in_about_page,
-    in_victory_screen
-};
+void invoke_chess_engine() {
+    root.node_content.position = game.positions[game.halfmove];
+    game.halfmove++;
+    
+    game.positions[game.halfmove] = *choose_move(&root);
+}
 
 enum State handle_main_menu() {
     curs_set(0);
     noecho();
 
     draw_header(&header_state);
-    enum Main_menu_return ret = draw_menu(&main_menu_state);
+    enum Main_menu_return ret = (enum Main_menu_return)draw_menu(&main_menu_state);
 
     switch (ret) {
         case option_new_game:
-            log_msg("Starting new game", log);
-            init_game(&game, &starting_position, 512);
+            return in_sub_menu;
+        break;
 
-            // TODO: delete
-            FILE *f = fopen("./example_game.pgn", "r");
-
-            load_pgn(&game, f);
-
-            main_menu_state.continue_enabled = 1;
-            // fall through
         case option_continue:
-            log_msg("Continuing new game", verbose);
-            return in_game;
+            log_msg("(tui) Continuing game", verbose);
+            return main_menu_state.prev_state;
         break;
 
         case option_load_game:
@@ -374,8 +410,28 @@ enum State handle_main_menu() {
     }            
 }
 
-enum State handle_game() {
+enum State handle_sub_menu() {
+    log_msg("START!", verbose);
+    enum Sub_menu_return ret = (enum Sub_menu_return) draw_menu(&sub_menu_state);
+
+    switch (ret) {
+        case option_against_human:
+            return in_game_human;
+        case option_against_engine:
+            return in_game_engine;
+    }
+
+    log_msg("DONE!", verbose);
+}
+
+enum State handle_game(enum State state) {
+    endwin();
+
     int caused_error = 0;
+
+    if (state == in_game_engine_with_error || state == in_game_human_with_error)
+        draw_error(&error_state);
+
     draw_board(&boardscr_state, &(game.positions[game.halfmove]));
 
     char inp[16];
@@ -386,12 +442,14 @@ enum State handle_game() {
     draw_input(&input_state, inp);
 
     char msg[64];
-    snprintf(msg, 64, "Interpreting input \'%s\'", inp);
+    snprintf(msg, 64, "(tui) Interpreting input \'%s\'", inp);
     log_msg(msg, verbose);
     
     if( !strcmp(inp, "menu") || !strcmp(inp, "quit") || !strcmp(inp, "exit") ) {
         clear();
         refresh();
+        main_menu_state.prev_state = state;
+        main_menu_state.continue_enabled = 1;
         return in_main_menu;
     }
 
@@ -399,7 +457,7 @@ enum State handle_game() {
         caused_error = 1;
     }
 
-    else {
+    else if (state == in_game_engine || state == in_game_engine_with_error) {
         struct Position *last_pos = &game.positions[game.halfmove];
         update_state(last_pos);
 
@@ -407,16 +465,33 @@ enum State handle_game() {
             main_menu_state.continue_enabled = 0;
             return in_victory_screen;
         }
+
+        draw_board(&boardscr_state, &(game.positions[game.halfmove]));
+
+        curs_set(0);
+        invoke_chess_engine();
+        curs_set(1);
     }
 
     // Clear input buffer
     for(int i = 0; i < 64; i++) {
         inp[i] = '\0';
     }
-    if (caused_error)
-        return in_game_with_error;
-    else
-        return in_game;
+
+    if (caused_error) {
+        if (state == in_game_engine || state == in_game_engine_with_error)
+            return in_game_engine_with_error;
+
+        else if (state == in_game_human || state == in_game_human_with_error)
+            return in_game_human_with_error;
+    }
+    else {
+        if (state == in_game_engine || state == in_game_engine_with_error)
+            return in_game_engine;
+
+        else if (state == in_game_human || state == in_game_human_with_error)
+            return in_game_human;
+    }
 }
 
 void handle_victory() {
@@ -433,14 +508,21 @@ void loop() {
             state = handle_main_menu();
         break;
 
-        case (in_game_with_error):
-            draw_error(&error_state);
-            // fall through
-        case(in_game):
+        case (in_sub_menu):
+            state = handle_sub_menu();
+
+            // For sure we want to start a new game
+            init_game(&game, &starting_position, 512);
+        break;
+
+        case (in_game_engine):
+        case (in_game_engine_with_error):
+        case (in_game_human):
+        case (in_game_human_with_error):
             curs_set(1);
             echo();
-            
-            state = handle_game();
+
+            state = handle_game(state);
             
             curs_set(0);
             noecho();
@@ -461,11 +543,15 @@ void loop() {
     refresh();
 }
 
-void tui_main() {
-    init_curses();
-    setup_wins();
-
+void tui_loop() {
     for(;;) {
         loop();
     }
+}
+
+void init_tui() {
+    init_curses();
+    setup_wins();
+
+    init_game(&game, &starting_position, 512);
 }

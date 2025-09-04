@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdio.h>
+#include <stdint.h>
 
 // o for empty square, capital letters = white pieces, p/P_passant for pawns that can be taken en passant
 enum Piece {
@@ -98,9 +99,15 @@ void delete_game(struct Game* game);
 int play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece promote);
 
 /*
-* Play move
+* Play move, ignoring if move is illegal
 */
 void unsafe_play_move(struct Game* game, uint8_t from, uint8_t to, enum Piece promote);
+
+/*
+* Play move from crnt_position, store at new_position
+*/
+void unsafe_play_move_to(struct Position* crnt_position, struct Position* new_position, uint8_t from, uint8_t to, enum Piece promote);
+
 
 /*
 * evaluate a move using algebraic notation (e.a. Nf3 e4 ...)

@@ -9,5 +9,7 @@ enum Verbosity {
     error
 };
 
+void init_log();
+
 void log_msg(char* msg, enum Verbosity type);
 
